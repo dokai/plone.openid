@@ -1,7 +1,6 @@
 from AccessControl.SecurityInfo import ClassSecurityInfo
 from Acquisition import aq_parent
 from BTrees.OOBTree import OOBTree
-from DateTime import DateTime
 from Products.PageTemplates.PageTemplateFile import PageTemplateFile
 from Products.PluggableAuthService.interfaces.plugins import IAuthenticationPlugin
 from Products.PluggableAuthService.interfaces.plugins import IPropertiesPlugin
@@ -217,12 +216,6 @@ class OpenIdPlugin(BasePlugin):
                         for attr_def in self.getProperty('sreg_attributes'):
                             alias, name = attr_def.split(None, 2)
                             user_attributes[alias] = sreg_attributes.get(name, '').decode('utf-8')
-                            if name == 'dob':
-                                # Parse the date-of-birth fields to a DateTime
-                                try:
-                                    user_attributes[alias] = DateTime(user_attributes[alias])
-                                except:
-                                    pass
 
                         if user_attributes:
                             self._attribute_store.setdefault(identity, PersistentMapping()).update(user_attributes)
