@@ -53,10 +53,10 @@ class OpenIdPlugin(BasePlugin):
 
     _properties = BasePlugin._properties + (
         dict(id='sreg_enabled', type='boolean', mode='w', label='Enable SReg', description='Enables the Simple Registration extension.'),
-        dict(id='sreg_attributes', type='lines', mode='w', label='SReg attributes', description='List of Simple Registration attributes to request from the OpenID provider.'),
-        dict(id='sreg_attributes_required', type='lines', mode='w', label='Required SReg attributes', description='List of Simple Registration attributes that are required. This should be a subset of "SReg attributes".'),
+        dict(id='sreg_attributes', type='lines', mode='w', label='SReg attributes', description='List of Simple Registration attributes to request from the OpenID provider given as "<alias> <attr_name>" tokens, one per line.'),
+        dict(id='sreg_attributes_required', type='lines', mode='w', label='Required SReg attributes', description='List of required Simple Registration attributes. The items may be referenced by either <alias> or <attr_name> and must be listed in "SReg attributes".'),
         dict(id='ax_enabled', type='boolean', mode='w', label='Enable AX', description='Enables the Attribute Exchange 1.0 extension.'),
-        dict(id='ax_attributes', type='lines', mode='w', label='AX attributes', description='List of attributes to request from the OpenID provider given as <alias> <type_uri>.'),
+        dict(id='ax_attributes', type='lines', mode='w', label='AX attributes', description='List of attributes to request from the OpenID provider given as "<alias> <type_uri>" tokens, one per line.'),
         dict(id='ax_attributes_required', type='lines', mode='w', label='Required AX attributes', description='List of required AX attributes. The items may be referenced by either <alias> or <type_uri> and must be listed in "AX attributes".'),
     )
 

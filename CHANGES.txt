@@ -4,6 +4,9 @@ Changelog
 2.0.1 - unreleased
 ------------------
 
+* Implemented support for the Simple Registration and Attribute Exchange
+  extensions
+  [dokai]
 
 2.0 - 2010-07-18
 ----------------
