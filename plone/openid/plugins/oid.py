@@ -1,24 +1,25 @@
-from Acquisition import aq_parent
 from AccessControl.SecurityInfo import ClassSecurityInfo
+from Acquisition import aq_parent
+from BTrees.OOBTree import OOBTree
+from DateTime import DateTime
 from Products.PageTemplates.PageTemplateFile import PageTemplateFile
+from Products.PluggableAuthService.interfaces.plugins import IAuthenticationPlugin
+from Products.PluggableAuthService.interfaces.plugins import IPropertiesPlugin
+from Products.PluggableAuthService.interfaces.plugins import IUserEnumerationPlugin
 from Products.PluggableAuthService.plugins.BasePlugin import BasePlugin
 from Products.PluggableAuthService.utils import classImplements
-from Products.PluggableAuthService.interfaces.plugins \
-                import IAuthenticationPlugin, IUserEnumerationPlugin
-from Products.PluggableAuthService.interfaces.plugins import IPropertiesPlugin
-from plone.openid.interfaces import IOpenIdExtractionPlugin
-from plone.openid.store import ZopeStore
-from zExceptions import Redirect
-import transaction
-from openid.consumer.consumer import Consumer, SUCCESS
+from openid.consumer.consumer import Consumer
+from openid.consumer.consumer import SUCCESS
 from openid.extensions import ax
 from openid.extensions import sreg
 from openid.yadis.discover import DiscoveryFailure
 from persistent.mapping import PersistentMapping
+from plone.openid.interfaces import IOpenIdExtractionPlugin
+from plone.openid.store import ZopeStore
+from zExceptions import Redirect
 
-from DateTime import DateTime
-from BTrees.OOBTree import OOBTree
 import logging
+import transaction
 
 manage_addOpenIdPlugin = PageTemplateFile("../www/openidAdd", globals(), 
                 __name__="manage_addOpenIdPlugin")
