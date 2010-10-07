@@ -5,12 +5,19 @@ from Products.PluggableAuthService.plugins.BasePlugin import BasePlugin
 from Products.PluggableAuthService.utils import classImplements
 from Products.PluggableAuthService.interfaces.plugins \
                 import IAuthenticationPlugin, IUserEnumerationPlugin
+from Products.PluggableAuthService.interfaces.plugins import IPropertiesPlugin
 from plone.openid.interfaces import IOpenIdExtractionPlugin
 from plone.openid.store import ZopeStore
 from zExceptions import Redirect
 import transaction
-from openid.yadis.discover import DiscoveryFailure
 from openid.consumer.consumer import Consumer, SUCCESS
+from openid.extensions import ax
+from openid.extensions import sreg
+from openid.yadis.discover import DiscoveryFailure
+from persistent.mapping import PersistentMapping
+
+from DateTime import DateTime
+from BTrees.OOBTree import OOBTree
 import logging
 
 manage_addOpenIdPlugin = PageTemplateFile("../www/openidAdd", globals(), 
@@ -36,11 +43,28 @@ class OpenIdPlugin(BasePlugin):
 
     meta_type = "OpenID plugin"
     security = ClassSecurityInfo()
+    
+    sreg_enabled = False
+    sreg_attributes = tuple()
+    sreg_attributes_required = tuple()
+    ax_enabled = False
+    ax_attributes = tuple()
+    ax_attributes_required = tuple()
+
+    _properties = BasePlugin._properties + (
+        dict(id='sreg_enabled', type='boolean', mode='w', label='Enable SReg', description='Enables the Simple Registration extension.'),
+        dict(id='sreg_attributes', type='lines', mode='w', label='SReg attributes', description='List of Simple Registration attributes to request from the OpenID provider.'),
+        dict(id='sreg_attributes_required', type='lines', mode='w', label='Required SReg attributes', description='List of Simple Registration attributes that are required. This should be a subset of "SReg attributes".'),
+        dict(id='ax_enabled', type='boolean', mode='w', label='Enable AX', description='Enables the Attribute Exchange 1.0 extension.'),
+        dict(id='ax_attributes', type='lines', mode='w', label='AX attributes', description='List of attributes to request from the OpenID provider given as <alias> <type_uri>.'),
+        dict(id='ax_attributes_required', type='lines', mode='w', label='Required AX attributes', description='List of required AX attributes. The items may be referenced by either <alias> or <type_uri> and must be listed in "AX attributes".'),
+    )
 
     def __init__(self, id, title=None):
         self._setId(id)
         self.title=title
         self.store=ZopeStore()
+        self._attribute_store = OOBTree()
 
 
     def getTrustRoot(self):
@@ -77,7 +101,6 @@ class OpenIdPlugin(BasePlugin):
             # which means the user did not authorize correctly.
             pass
 
-
     # IOpenIdExtractionPlugin implementation
     def initiateChallenge(self, identity_url, return_to=None):
         consumer=self.getConsumer()
@@ -91,7 +114,38 @@ class OpenIdPlugin(BasePlugin):
             logger.info("openid consumer error for identity %s: %s",
                     identity_url, e.why)
             pass
+
+        if self.getProperty('sreg_enabled', False):
+            # List of SReg attributes defined in the 1.0 specification
+            sreg_allowed_attributes = set(sreg.data_fields.keys())
+            # Set of attributes the site considers required
+            sreg_required_attributes = sreg_allowed_attributes.intersection(set(self.getProperty('sreg_attributes_required')))
             
+            sreg_attributes = set()
+            for attr_def in self.getProperty('sreg_attributes'):
+                alias, name = attr_def.split(None, 2)
+                sreg_attributes.add(name)
+            sreg_attributes = sreg_allowed_attributes.intersection(sreg_attributes)
+
+            sreg_optional_attributes = sreg_attributes - sreg_required_attributes
+
+            sreg_request = sreg.SRegRequest()
+            sreg_request.requestFields(list(sreg_optional_attributes), required=False)
+            sreg_request.requestFields(list(sreg_required_attributes), required=True)
+
+            auth_request.addExtension(sreg_request)
+
+        if self.getProperty('ax_enabled', False):
+            ax_attributes_required = set(self.getProperty('ax_attributes_required'))
+            ax_request = ax.FetchRequest()
+
+            for attr_def in self.getProperty('ax_attributes'):
+                alias, type_uri = attr_def.split(None, 2)
+                required = alias in ax_attributes_required or type_uri in ax_attributes_required
+                ax_request.add(ax.AttrInfo(type_uri, alias=alias, required=required))
+
+            auth_request.addExtension(ax_request)
+
         if return_to is None:
             return_to=self.REQUEST.form.get("came_from", None)
         if not return_to or 'janrain_nonce' in return_to:
@@ -148,6 +202,54 @@ class OpenIdPlugin(BasePlugin):
             identity=result.identity_url
             
             if result.status==SUCCESS:
+                # Simple Registration properties
+                if self.getProperty('sreg_enabled', False):
+                    sreg_response = sreg.SRegResponse.fromSuccessResponse(result)
+                    if sreg_response is not None:
+                        if not hasattr(self, '_attribute_store'):
+                            self._attribute_store = OOBTree()
+
+                        sreg_attributes = dict(sreg_response)
+                        user_attributes = {}
+                        for attr_def in self.getProperty('sreg_attributes'):
+                            alias, name = attr_def.split(None, 2)
+                            user_attributes[alias] = sreg_attributes.get(name, '').decode('utf-8')
+                            if name == 'dob':
+                                # Parse the date-of-birth fields to a DateTime
+                                try:
+                                    user_attributes[alias] = DateTime(user_attributes[alias])
+                                except:
+                                    pass
+
+                        if user_attributes:
+                            self._attribute_store.setdefault(identity, PersistentMapping()).update(user_attributes)
+
+                # Attribute Exchange properties
+                if self.getProperty('ax_enabled', False):
+                    ax_response = ax.FetchResponse.fromSuccessResponse(result)
+                    if ax_response is not None:
+                        if not hasattr(self, '_attribute_store'):
+                            self._attribute_store = OOBTree()
+
+                        user_attributes = {}
+                        for attr_def in self.getProperty('ax_attributes'):
+                            alias, type_uri = attr_def.split(None, 2)
+                            if ax_response.count(type_uri) >= 1:
+                                # We always take the first returned attribute
+                                # value even if multiple are offered.
+                                value = ax_response.get(type_uri)[0].decode('utf-8')
+                            else:
+                                value = u''
+
+                            if value.strip():
+                                # Only use non-empty values so we don't mask
+                                # attributes that were possibly acquired
+                                # through SReg.
+                                user_attributes[alias] = value
+
+                        if user_attributes:
+                            self._attribute_store.setdefault(identity, PersistentMapping()).update(user_attributes)
+
                 self._getPAS().updateCredentials(self.REQUEST,
                         self.REQUEST.RESPONSE, identity, "")
                 return (identity, identity)
@@ -187,8 +289,14 @@ class OpenIdPlugin(BasePlugin):
                 } ]
 
 
+    def getPropertiesForUser(self, user, request=None):
+        try:
+            return self._attribute_store.get(user.getId(), {})
+        except AttributeError:
+            self._attribute_error = OOBTree()
+            return {}
 
 classImplements(OpenIdPlugin, IOpenIdExtractionPlugin, IAuthenticationPlugin,
-                IUserEnumerationPlugin)
+                IUserEnumerationPlugin, IPropertiesPlugin)
 
 
