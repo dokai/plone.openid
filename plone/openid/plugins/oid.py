@@ -116,6 +116,7 @@ class OpenIdPlugin(BasePlugin):
                     identity_url, e.why)
             pass
 
+        # Activate Simple Registration extension
         if self.getProperty('sreg_enabled', False):
             # List of SReg attributes defined in the 1.0 specification
             sreg_allowed_attributes = set(sreg.data_fields.keys())
@@ -136,6 +137,7 @@ class OpenIdPlugin(BasePlugin):
 
             auth_request.addExtension(sreg_request)
 
+        # Activate Attribute Exchange extension
         if self.getProperty('ax_enabled', False):
             ax_attributes_required = set(self.getProperty('ax_attributes_required'))
             ax_request = ax.FetchRequest()
@@ -299,5 +301,3 @@ class OpenIdPlugin(BasePlugin):
 
 classImplements(OpenIdPlugin, IOpenIdExtractionPlugin, IAuthenticationPlugin,
                 IUserEnumerationPlugin, IPropertiesPlugin)
-
-
