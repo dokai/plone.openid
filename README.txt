@@ -43,6 +43,43 @@ environments it will be needed to also setup a session so users stay
 logged in when they visit another page. This can be done via a special
 session management PAS plugin, for example `plone.session`_.
 
+Provider selection
+------------------
+
+By default the plugin accepts any OpenID compliant provider to authenticate
+users. However, the list of accepted providers can be configured using either
+a blacklist or a whitelist with the following properties.
+
+**Provider whitelist (provider_whitelist)**
+
+  List of provider domains that are allowed to authenticate users for the
+  plugin. The providers must be defined using their primary addresses, e.g.
+  ``http://myopenid.com/``. The identity URLs provided by the user will be
+  matched against these addresses to decide whether authentication will be
+  accepted.
+  
+  To check will be performed both in the initiation phase (against the
+  claimed id) and the response phase (against the provider supplied id) and
+  will work for delegated identity urls also.
+
+  Any identifier that does not match the providers given in this list will be
+  rejected. An empty value will disable whitelist checking.
+
+**Provider blacklist (provider_blacklist)**
+
+  List of provider domains that are disallowed to authenticate users for the
+  plugin. The providers must be defined using their primary addresses, e.g.
+  ``http://myopenid.com/``. The identity URLs provided by the user will be
+  matched against these addresses to decide whether authentication will be
+  accepted.
+  
+  To check will be performed both in the initiation phase (against the
+  claimed id) and the response phase (against the provider supplied id) and
+  will work for delegated identity urls also.
+
+  Any identifier that does matches the providers given in this list will be
+  rejected. An empty value will disable blacklist checking.
+
 Simple Registration extension
 -----------------------------
 
@@ -171,6 +208,25 @@ response and then updates the values with the attributes received from the AX
 response. This means that if the local aliased names for both extensions
 contain identical names then the values from the AX response will override
 the values from the SReg response.
+
+Strict attribute requirements
+-----------------------------
+
+It is possible to mark the Simple Registration and Attribute Exchange
+attributes as required using the properties defined above. However, it is up
+to the provider and the user to decide whether to return these attributes as
+part of the authentication response.
+
+By default, the plugin will accept successful authentication responses even if
+the required attributes are missing. It is possible to enable a strict mode
+for the required attributes that will reject successful authentication
+responses in case any of the required attributes are missing.
+
+**Strict required attributes (strict_required_attributes)**
+
+  Boolean property that enables strict mode for required attributes.
+  Authentication will be rejected if any of the required attributes are
+  missing.
 
 .. _plone.session: http://pypi.python.org/pypi/plone.session
 

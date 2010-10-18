@@ -19,6 +19,7 @@ from zExceptions import Redirect
 
 import logging
 import transaction
+import urlparse
 
 manage_addOpenIdPlugin = PageTemplateFile("../www/openidAdd", globals(), 
                 __name__="manage_addOpenIdPlugin")
@@ -43,15 +44,21 @@ class OpenIdPlugin(BasePlugin):
 
     meta_type = "OpenID plugin"
     security = ClassSecurityInfo()
-    
+
+    provider_blacklist = tuple()
+    provider_whitelist = tuple()
     sreg_enabled = False
     sreg_attributes = tuple()
     sreg_attributes_required = tuple()
     ax_enabled = False
     ax_attributes = tuple()
     ax_attributes_required = tuple()
+    strict_required_attributes = False
 
     _properties = BasePlugin._properties + (
+        dict(id='provider_blacklist', type='lines', mode='w', label='Provider blacklist', description='List of provider domains that are not accepted for authentication. Other domains will be accepted.'),
+        dict(id='provider_whitelist', type='lines', mode='w', label='Provider whitelist', description='List of provider domains that are accepted for authentication. Other domains will be declined.'),
+        dict(id='strict_required_attributes', type='boolean', mode='w', label='Strict required attributes', description='If True, authentication will be declined if required attributes are missing.'),
         dict(id='sreg_enabled', type='boolean', mode='w', label='Enable SReg', description='Enables the Simple Registration extension.'),
         dict(id='sreg_attributes', type='lines', mode='w', label='SReg attributes', description='List of Simple Registration attributes to request from the OpenID provider given as "<alias> <attr_name>" tokens, one per line.'),
         dict(id='sreg_attributes_required', type='lines', mode='w', label='Required SReg attributes', description='List of required Simple Registration attributes. The items may be referenced by either <alias> or <attr_name> and must be listed in "SReg attributes".'),
@@ -65,7 +72,6 @@ class OpenIdPlugin(BasePlugin):
         self.title=title
         self.store=ZopeStore()
         self._attribute_store = OOBTree()
-
 
     def getTrustRoot(self):
         pas=self._getPAS()
@@ -101,8 +107,78 @@ class OpenIdPlugin(BasePlugin):
             # which means the user did not authorize correctly.
             pass
 
+    def getSRegAttributeInfo(self):
+        """Returns a set of (attr_name, alias, required) tuples of the
+        configured Simple Registration attributes.
+        """
+        # Set of SReg attributes defined in the 1.1 specification
+        sreg_allowed_attributes = set(sreg.data_fields.keys())
+
+        # Set of valid SReg attributes the site considers required
+        sreg_required_attributes = sreg_allowed_attributes.intersection(
+            set(self.getProperty('sreg_attributes_required')))
+
+        sreg_attributes = set()
+        for attr_def in self.getProperty('sreg_attributes'):
+            alias, name = attr_def.split(None, 2)
+            if name in sreg_allowed_attributes:
+                sreg_attributes.add((name, alias, name in sreg_required_attributes))
+
+        return sreg_attributes
+
+
+    def getAXAttributeInfo(self):
+        """Returns a list of (type_uri, alias, required) tuples of the
+        configured Attribute Exchanged attributes.
+        """
+        ax_attributes_required = set(self.getProperty('ax_attributes_required'))
+
+        ax_attributes = set()
+        for attr_def in self.getProperty('ax_attributes'):
+            alias, type_uri = attr_def.split(None, 2)
+            required = alias in ax_attributes_required or type_uri in ax_attributes_required
+            ax_attributes.add((type_uri, alias, required))
+
+        return ax_attributes
+
+
+    def allowProvider(self, identity_url):
+        """Returns True if the OpenID provider referenced by ``identity_url``
+        should be allowed to provide authentication, False otherwise.
+        """
+        allow_provider = True
+        if not (identity_url.startswith('http://') or identity_url.startswith('https://')):
+            identity_url = 'http://%s' % identity_url
+
+        identity_domain = urlparse.urlparse(identity_url).netloc
+
+        blacklist = set(self.getProperty('provider_blacklist', []))
+        if len(blacklist) > 0:
+            for provider in blacklist:
+                provider_domain = urlparse.urlparse(provider).netloc
+                if provider_domain in identity_domain:
+                    allow_provider = False
+                    break
+
+        whitelist = set(self.getProperty('provider_whitelist', []))
+        if len(whitelist) > 0:
+            allow_provider = False
+            for provider in whitelist:
+                provider_domain = urlparse.urlparse(provider).netloc
+                if provider_domain in identity_domain:
+                    allow_provider = True
+                    break
+        
+        return allow_provider
+
     # IOpenIdExtractionPlugin implementation
     def initiateChallenge(self, identity_url, return_to=None):
+        # Check the identity_url against the whilelist/blacklist policy
+        if not self.allowProvider(identity_url):
+            logger.info("openid provider blocked due to local policy: %s",
+                    identity_url)
+            return
+
         consumer=self.getConsumer()
         try:
             auth_request=consumer.begin(identity_url)
@@ -117,33 +193,18 @@ class OpenIdPlugin(BasePlugin):
 
         # Activate Simple Registration extension
         if self.getProperty('sreg_enabled', False):
-            # List of SReg attributes defined in the 1.0 specification
-            sreg_allowed_attributes = set(sreg.data_fields.keys())
-            # Set of attributes the site considers required
-            sreg_required_attributes = sreg_allowed_attributes.intersection(set(self.getProperty('sreg_attributes_required')))
-            
-            sreg_attributes = set()
-            for attr_def in self.getProperty('sreg_attributes'):
-                alias, name = attr_def.split(None, 2)
-                sreg_attributes.add(name)
-            sreg_attributes = sreg_allowed_attributes.intersection(sreg_attributes)
-
-            sreg_optional_attributes = sreg_attributes - sreg_required_attributes
-
+            sreg_attributes = self.getSRegAttributeInfo()
             sreg_request = sreg.SRegRequest()
-            sreg_request.requestFields(list(sreg_optional_attributes), required=False)
-            sreg_request.requestFields(list(sreg_required_attributes), required=True)
+            sreg_request.requestFields([name for (name, alias, required) in sreg_attributes if not required], required=False)
+            sreg_request.requestFields([name for (name, alias, required) in sreg_attributes if required], required=True)
 
             auth_request.addExtension(sreg_request)
 
         # Activate Attribute Exchange extension
         if self.getProperty('ax_enabled', False):
-            ax_attributes_required = set(self.getProperty('ax_attributes_required'))
             ax_request = ax.FetchRequest()
 
-            for attr_def in self.getProperty('ax_attributes'):
-                alias, type_uri = attr_def.split(None, 2)
-                required = alias in ax_attributes_required or type_uri in ax_attributes_required
+            for type_uri, alias, required in self.getAXAttributeInfo():
                 ax_request.add(ax.AttrInfo(type_uri, alias=alias, required=required))
 
             auth_request.addExtension(ax_request)
@@ -189,6 +250,7 @@ class OpenIdPlugin(BasePlugin):
 
     # IAuthenticationPlugin implementation
     def authenticateCredentials(self, credentials):
+
         if not credentials.has_key("openid.source"):
             return None
 
@@ -199,11 +261,16 @@ class OpenIdPlugin(BasePlugin):
             # or python-openid will complain
             query = credentials.copy()
             del query['extractor']
-            
+
             result=consumer.complete(query, self.REQUEST.ACTUAL_URL)
             identity=result.identity_url
             
-            if result.status==SUCCESS:
+            if not self.allowProvider(identity):
+                logger.info("OpenId Authentication for %s failed because the provider is not allowed.",
+                    identity)
+            elif result.status==SUCCESS:
+
+                missing_attributes = set()
                 # Simple Registration properties
                 if self.getProperty('sreg_enabled', False):
                     sreg_response = sreg.SRegResponse.fromSuccessResponse(result)
@@ -213,12 +280,13 @@ class OpenIdPlugin(BasePlugin):
 
                         sreg_attributes = dict(sreg_response)
                         user_attributes = {}
-                        for attr_def in self.getProperty('sreg_attributes'):
-                            alias, name = attr_def.split(None, 2)
-                            user_attributes[alias] = sreg_attributes.get(name, '').decode('utf-8')
 
-                        if user_attributes:
-                            self._attribute_store.setdefault(identity, PersistentMapping()).update(user_attributes)
+                        for name, alias, required in self.getSRegAttributeInfo():
+                            user_attributes[alias] = sreg_attributes.get(name, '').decode('utf-8')
+                            if required and len(user_attributes[alias].strip()) == 0:
+                                missing_attributes.add((name, alias))
+
+                        self._attribute_store.setdefault(identity, PersistentMapping()).update(user_attributes)
 
                 # Attribute Exchange properties
                 if self.getProperty('ax_enabled', False):
@@ -228,8 +296,7 @@ class OpenIdPlugin(BasePlugin):
                             self._attribute_store = OOBTree()
 
                         user_attributes = {}
-                        for attr_def in self.getProperty('ax_attributes'):
-                            alias, type_uri = attr_def.split(None, 2)
+                        for type_uri, alias, required in self.getAXAttributeInfo():
                             if ax_response.count(type_uri) >= 1:
                                 # We always take the first returned attribute
                                 # value even if multiple are offered.
@@ -243,8 +310,15 @@ class OpenIdPlugin(BasePlugin):
                                 # through SReg.
                                 user_attributes[alias] = value
 
-                        if user_attributes:
-                            self._attribute_store.setdefault(identity, PersistentMapping()).update(user_attributes)
+                            if required and len(user_attributes.get(alias, '').strip()) == 0:
+                                missing_attributes.add((type_uri, alias))
+
+                        self._attribute_store.setdefault(identity, PersistentMapping()).update(user_attributes)
+
+                if self.getProperty('strict_required_attributes', False) and len(missing_attributes) > 0:
+                    logger.info("OpenId Authentication for %s failed because the provider failed to pass required attributes: %s",
+                                identity, ", ".join("%s (%s)" % (alias, name) for name, alias in missing_attributes))
+                    return None
 
                 self._getPAS().updateCredentials(self.REQUEST,
                         self.REQUEST.RESPONSE, identity, "")
