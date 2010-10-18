@@ -12,7 +12,6 @@ from openid.consumer.consumer import SUCCESS
 from openid.extensions import ax
 from openid.extensions import sreg
 from openid.yadis.discover import DiscoveryFailure
-from persistent.mapping import PersistentMapping
 from plone.openid.interfaces import IOpenIdExtractionPlugin
 from plone.openid.store import ZopeStore
 from zExceptions import Redirect
@@ -286,7 +285,7 @@ class OpenIdPlugin(BasePlugin):
                             if required and len(user_attributes[alias].strip()) == 0:
                                 missing_attributes.add((name, alias))
 
-                        self._attribute_store.setdefault(identity, PersistentMapping()).update(user_attributes)
+                        self._attribute_store[identity] = user_attributes
 
                 # Attribute Exchange properties
                 if self.getProperty('ax_enabled', False):
@@ -313,12 +312,18 @@ class OpenIdPlugin(BasePlugin):
                             if required and len(user_attributes.get(alias, '').strip()) == 0:
                                 missing_attributes.add((type_uri, alias))
 
-                        self._attribute_store.setdefault(identity, PersistentMapping()).update(user_attributes)
+                        values = self._attribute_store.get(identity, {})
+                        values.update(user_attributes)
+                        self._attribute_store[identity] = values
 
-                if self.getProperty('strict_required_attributes', False) and len(missing_attributes) > 0:
-                    logger.info("OpenId Authentication for %s failed because the provider failed to pass required attributes: %s",
-                                identity, ", ".join("%s (%s)" % (alias, name) for name, alias in missing_attributes))
-                    return None
+                if len(missing_attributes) > 0:
+                    logger.info("Failed to receive required attributes for %s: %s",
+                        identity, ", ".join("%s (%s)" % (alias, name) for name, alias in missing_attributes))
+
+                    if self.getProperty('strict_required_attributes', False):
+                        logger.info("OpenId Authentication for %s failed because of strict required parameters.",
+                                identity) 
+                        return None
 
                 self._getPAS().updateCredentials(self.REQUEST,
                         self.REQUEST.RESPONSE, identity, "")
