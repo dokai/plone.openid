@@ -138,11 +138,10 @@ of the extension is managed using the following properties
 **Required SReg attributes (sreg_attributes_required)**
 
   List of attributes that are marked as required in the SReg request. The
-  attributes may be referenced by either alias or the SReg attribute name and
-  must exist in the ``sreg_attributes`` property. Unknown attributes will be
-  ignored. Note that it is possible for the OpenID provider to omit attributes
-  marked required and it is up to the Relying Party to decide how to handle
-  the situation.
+  attributes must reference valid SReg attribute names that are present in the
+  ``sreg_attributes`` property. Unknown attributes will be ignored. Note that
+  it is possible for the OpenID provider to omit attributes marked required
+  and it is up to the Relying Party to decide how to handle the situation.
 
 Attribute Exchange extension
 ----------------------------
