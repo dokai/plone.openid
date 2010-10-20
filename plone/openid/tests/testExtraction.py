@@ -169,6 +169,21 @@ class TestOpenIdExtraction(unittest.TestCase):
 
         self.failUnless(plugin.allowProvider("http://john.doe.myopenid.com"))
 
+    def test_getHTTPDomain(self):
+        plugin=self.createPlugin()
+        self.assertEquals("provider.com",
+            plugin._getHTTPDomain("http://provider.com"))
+        self.assertEquals("provider.com",
+            plugin._getHTTPDomain("http://provider.com/"))
+        self.assertEquals("provider.com",
+            plugin._getHTTPDomain("http://provider.com/foo/bar"))
+        self.assertEquals("provider.com",
+            plugin._getHTTPDomain("provider.com"))
+        self.assertEquals("provider.com",
+            plugin._getHTTPDomain("provider.com/"))
+        self.assertEquals("provider.com",
+            plugin._getHTTPDomain("provider.com/foo/bar"))
+
     def testGetSRegAttributeInfo_empty_attributes(self):
         plugin=self.createPlugin()
         self.assertEquals(plugin.getProperty("sreg_attributes"), tuple())
